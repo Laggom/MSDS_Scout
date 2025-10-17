@@ -1,0 +1,21 @@
+{
+  "name": "connect",
+  "version": "1.0.0",
+  "description": "Local setup for running the Playwright MCP server.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "mcp": "mcp-server-playwright --config mcp.config.json",
+    "mcp:headless": "mcp-server-playwright --config mcp.config.json --headless",
+    "playwright:install": "playwright install"
+  },
+  "keywords": [
+    "playwright",
+    "mcp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/mcp": "^0.0.42"
+  }
+}

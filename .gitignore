@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.playwright-mcp-output/
+mcp-output/
+playwright-report/
+.venv/
+data/
+tci_product*.html
