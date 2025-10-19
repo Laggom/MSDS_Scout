@@ -180,10 +180,10 @@ class ThermoFisherClient:
         if not items:
             return None
         first = items[0]
-        root = first.get("rootCatalogNumber")
-        if not isinstance(root, str) or not root.strip():
+        child_sku = first.get("childCatalogNumber")
+        if not isinstance(child_sku, str) or not child_sku.strip():
             return None
-        return f"{BASE_HOST}/apac/product/{root.strip()}"
+        return f"{BASE_HOST}/apac/product/{child_sku.strip()}"
 
     def fetch_sds_url(
         self,

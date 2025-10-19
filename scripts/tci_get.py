@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests
 from curl_cffi.requests import RequestsError
 
@@ -62,16 +63,18 @@ def resolve_product_url_from_search(
     if not term.strip():
         return None
 
-    search_url = SEARCH_ENDPOINT_TEMPLATE.format(country=country, language=language)
-    params = {"keyword": term}
+    search_url = f"https://www.tcichemicals.com/{country}/{language}/search/"
+    params = {"text": term, "sort": "productNameExactMatch"}
     response = session.get(search_url, params=params, timeout=60)
     response.raise_for_status()
 
-    match = re.search(r'href="(/[^"]+/p/[^"]+)"', response.text)
-    if not match:
+    soup = BeautifulSoup(response.content, "lxml")
+    product_link = soup.find("a", title=re.compile(r"Ethanol", re.IGNORECASE))
+
+    if not product_link or not product_link.has_attr("href"):
         return None
 
-    path = match.group(1)
+    path = product_link["href"]
     return urljoin("https://www.tcichemicals.com", path)
 
 

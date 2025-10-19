@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests
 from curl_cffi.requests import RequestsError
 
@@ -57,6 +59,34 @@ def create_session() -> requests.Session:
         }
     )
     return session
+
+
+def get_product_url_from_search(
+    session: requests.Session, search_term: str, country: str = "KR", language: str = "ko"
+) -> Optional[str]:
+    """Search for a product and return the URL of the first result."""
+    search_url = f"https://www.sigmaaldrich.com/{country}/{language}/search/{urllib.parse.quote(search_term)}"
+    try:
+        response = session.get(
+            search_url,
+            params={
+                "focus": "products",
+                "page": "1",
+                "perpage": "30",
+                "sort": "relevance",
+                "term": search_term,
+                "type": "product",
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+        first_result = soup.find("a", attrs={"id": re.compile(r"NAME-pdp-link-.*")})
+        if first_result and first_result.has_attr("href"):
+            return urllib.parse.urljoin(response.url, first_result["href"])
+    except RequestsError as exc:
+        print(f"Search failed: {exc}")
+    return None
 
 
 def prime_session(session: requests.Session, product_url: str, accept_language: str) -> None:
@@ -120,10 +150,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download Sigma-Aldrich SDS PDFs without Playwright MCP.",
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "--product-url",
         help="Product page URL (e.g. https://www.sigmaaldrich.com/KR/ko/product/sigald/34873)",
     )
+    group.add_argument(
+        "--search-term",
+        help="A search term (e.g., a product name or CAS number).",
+    )
+
     parser.add_argument(
         "legacy_product_url",
         nargs="?",
@@ -144,9 +180,20 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    product_url = args.product_url or args.legacy_product_url
+    session = create_session()
+
+    if args.search_term:
+        print(f"Searching for '{args.search_term}'...")
+        product_url = get_product_url_from_search(session, args.search_term)
+        if not product_url:
+            print("Could not find a product URL for the given search term.")
+            sys.exit(1)
+        print(f"Found product URL: {product_url}")
+    else:
+        product_url = args.product_url or args.legacy_product_url
+
     if not product_url:
-        parser.error("Please provide a product page URL with --product-url.")
+        parser.error("Please provide a product page URL with --product-url or a search term with --search-term.")
 
     parsed = parse_product_url(product_url)
     if not parsed:
@@ -157,7 +204,6 @@ def main() -> None:
     country, default_language, brand, product_number = parsed
     languages = normalize_languages(args.languages) or [default_language]
 
-    session = create_session()
     accept_language = compose_accept_language(country, default_language)
     try:
         prime_session(session, product_url, accept_language)
