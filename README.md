@@ -1,38 +1,38 @@
-# Project Overview
+# 프로젝트 개요
 
-This repository hosts a small toolbox for fetching Safety Data Sheets (SDS) from three vendors (Sigma-Aldrich, TCI, Thermo Fisher). The Python scripts now talk to each site directly over HTTPS using [`curl-cffi`](https://github.com/yifeikong/curl_cffi) where browser-grade TLS fingerprints are required. Playwright MCP remains in the tree only for manual inspection/debugging; the production scripts no longer depend on it.
+이 저장소는 세 개 공급사(Sigma-Aldrich, TCI, Thermo Fisher)의 안전보건자료(SDS)를 수집하는 도구 모음입니다. Python 스크립트는 [`curl-cffi`](https://github.com/yifeikong/curl_cffi)를 활용해 브라우저와 유사한 TLS 지문으로 직접 HTTPS 요청을 수행하며, 더 이상 Playwright MCP에 의존하지 않습니다. Playwright MCP 관련 설정은 디버깅용으로만 남겨 두었습니다.
 
-## Quick start
+## 빠른 시작
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-The requirements include `requests` and `curl-cffi`. No Node.js or Playwright setup is needed to run the downloaders.
+`requests`와 `curl-cffi`만 설치하면 되며, Node.js나 Playwright 설치는 필요하지 않습니다.
 
-## SDS scripts
+## SDS 스크립트
 
-| Script | Purpose | Notes |
+| 스크립트 | 용도 | 비고 |
 | --- | --- | --- |
-| `scripts/aldrich_mcp.py` | Download Sigma-Aldrich SDS PDFs for one product and language list. | Uses `curl-cffi` Chrome impersonation to obtain Akamai cookies, then fetches PDFs directly. |
-| `scripts/tci_get.py` | Save a TCI product page (HTML) and optionally download SDS PDFs. | Same browser-style session as above; emits a JSON summary. |
-| `scripts/thermofisher_sds.py` | Crawl Thermo Fisher category/product APIs and download SDS PDFs. | Continues to use the public JSON APIs with plain `requests`. |
+| `scripts/aldrich_mcp.py` | Sigma-Aldrich 제품의 SDS PDF를 언어별로 다운로드 | `curl-cffi` Chrome 모방 세션으로 Akamai 쿠키를 확보한 뒤 PDF를 직접 수집 |
+| `scripts/tci_get.py` | TCI 제품 페이지 HTML 저장 및 SDS 다운로드 | 위와 같은 세션으로 요청하며 JSON 요약을 출력 |
+| `scripts/thermofisher_sds.py` | Thermo Fisher 카테고리/제품 API 크롤링 후 SDS 다운로드 | 공개 JSON API를 그대로 활용 (`requests`) |
 
-Each script prints a JSON summary so the caller can capture output paths and metadata.
+모든 스크립트는 실행 결과를 JSON 요약으로 출력하여 다운로드 경로와 메타데이터를 한눈에 확인할 수 있습니다.
 
-## Optional: Playwright MCP server
+## 선택 사항: Playwright MCP 서버
 
-If you still need a Playwright MCP server for interactive debugging:
+디버깅 용도로 Playwright MCP 서버가 필요하다면 다음 명령으로 준비할 수 있습니다.
 
 ```bash
 npm install
 npm run playwright:install
 ```
 
-- `npm run mcp` – launch the MCP server with a visible browser.
-- `npm run mcp:headless` – launch in headless mode.
+- `npm run mcp` : GUI 모드 브라우저와 함께 MCP 서버 실행
+- `npm run mcp:headless` : 헤드리스 모드 실행
 
-Add the server to your MCP client configuration as:
+MCP 클라이언트 설정 예시는 다음과 같습니다.
 
 ```json
 {
@@ -45,14 +45,14 @@ Add the server to your MCP client configuration as:
 }
 ```
 
-The configuration file `mcp.config.json` is untouched from the original setup and remains available if you need a Playwright-backed session for analysis.
+`mcp.config.json`은 기존 구성 그대로 유지되어 있어 Playwright 기반 세션이 필요할 때 참고용으로 사용할 수 있습니다.
 
-## Repository layout
+## 저장소 구성
 
-- `scripts/` – Python helpers for each provider plus shared utilities.
-- `data/` – Default output directory for PDFs and cached sessions.
-- `README_*` – Provider-specific documentation (English and Korean).
-- `.playwright-mcp-output/` – Default log location when the MCP server runs (ignored by Git).
+- `scripts/` : 공급사별 Python 스크립트와 공용 유틸리티
+- `data/` : PDF와 세션 데이터를 기본적으로 저장하는 디렉터리
+- `README_*` : 공급사별 안내 문서(한국어 버전만 유지)
+- `.playwright-mcp-output/` : MCP 서버 실행 시 생성되는 로그(버전 관리 제외)
 
 ---
-Last updated: 2025-10-19
+마지막 업데이트: 2025-10-19
