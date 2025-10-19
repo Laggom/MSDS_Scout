@@ -32,6 +32,14 @@ python -m pip install -r requirements.txt
     --languages ko en \
     --output-dir data/sds_tci
   ```
+- 검색어(물질명 또는 CAS)로 제품을 찾아 다운로드:
+  ```bash
+  python scripts/tci_get.py \
+    --search-term ethanol \
+    --download-sds \
+    --languages ko \
+    --output-dir data/sds_tci
+  ```
 
 ## 주요 옵션
 | 옵션 | 설명 | 기본값 |
@@ -42,6 +50,7 @@ python -m pip install -r requirements.txt
 | `--languages` | 다운로드할 언어 코드 (`ko`, `en` 등). 생략 시 페이지에 노출된 언어 전체를 사용 | 페이지 언어 목록 |
 | `--output-dir` | SDS PDF 저장 폴더 | `data/sds` |
 | `--use-existing-session` | 하위 호환용 플래그. 현재 동작에는 영향 없음 | 사용 안 함 |
+| `--search-term` | 검색어(물질명 또는 CAS)로 제품을 찾은 뒤 최상위 결과를 사용 | 사용 안 함 |
 
 ## 동작 방식
 1. `curl-cffi` 세션(Chrome 120 모방)으로 제품 페이지를 호출해 HTML과 쿠키를 확보합니다.

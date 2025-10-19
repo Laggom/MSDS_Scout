@@ -18,6 +18,7 @@ from sds_common import DownloadRecord, build_summary, normalize_languages, print
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 URL_DEFAULT = "https://www.tcichemicals.com/KR/ko/p/L0483"
+SEARCH_ENDPOINT_TEMPLATE = "https://www.tcichemicals.com/{country}/{language}/search"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -49,6 +50,29 @@ def fetch_product_page(session: requests.Session, url: str) -> str:
     response = session.get(url, timeout=60)
     response.raise_for_status()
     return response.text
+
+
+def resolve_product_url_from_search(
+    session: requests.Session,
+    *,
+    term: str,
+    country: str,
+    language: str,
+) -> Optional[str]:
+    if not term.strip():
+        return None
+
+    search_url = SEARCH_ENDPOINT_TEMPLATE.format(country=country, language=language)
+    params = {"keyword": term}
+    response = session.get(search_url, params=params, timeout=60)
+    response.raise_for_status()
+
+    match = re.search(r'href="(/[^"]+/p/[^"]+)"', response.text)
+    if not match:
+        return None
+
+    path = match.group(1)
+    return urljoin("https://www.tcichemicals.com", path)
 
 
 @dataclass
@@ -249,10 +273,31 @@ def main() -> None:
         action="store_true",
         help="Deprecated flag kept for compatibility; sessions are handled automatically.",
     )
+    parser.add_argument(
+        "--search-term",
+        help="Lookup the product by material name or CAS number and use the top result."
+    )
     args = parser.parse_args()
 
     product_url = args.product_url
     session = create_session()
+    if args.search_term:
+        parsed = urlparse(product_url)
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        country = segments[0] if len(segments) >= 1 else "KR"
+        language = segments[1] if len(segments) >= 2 else "ko"
+        resolved = resolve_product_url_from_search(
+            session,
+            term=args.search_term,
+            country=country,
+            language=language,
+        )
+        if not resolved:
+            print(f"No TCI product found for search term '{args.search_term}'.")
+            raise SystemExit(1)
+        print(f"Resolved search term '{args.search_term}' to: {resolved}")
+        product_url = resolved
+
     try:
         html = fetch_product_page(session, product_url)
     except RequestsError as exc:

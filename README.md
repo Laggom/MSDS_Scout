@@ -1,6 +1,6 @@
 # 프로젝트 개요
 
-이 저장소는 세 개 공급사(Sigma-Aldrich, TCI, Thermo Fisher)의 안전보건자료(SDS)를 수집하는 도구 모음입니다. Python 스크립트는 [`curl-cffi`](https://github.com/yifeikong/curl_cffi)를 활용해 브라우저와 유사한 TLS 지문으로 직접 HTTPS 요청을 수행하며, 더 이상 Playwright MCP에 의존하지 않습니다. Playwright MCP 관련 설정은 디버깅용으로만 남겨 두었습니다.
+이 저장소는 세 공급사(Sigma-Aldrich, TCI, Thermo Fisher)의 안전보건자료(SDS)를 수집하는 도구 모음입니다. Python 스크립트는 [`curl-cffi`](https://github.com/yifeikong/curl_cffi)를 활용해 브라우저와 유사한 TLS 지문으로 직접 HTTPS 요청을 수행하며, 더 이상 Playwright MCP에 의존하지 않습니다. Playwright MCP 관련 설정은 디버깅용으로만 남겨 두었습니다.
 
 ## 빠른 시작
 
@@ -14,9 +14,9 @@ python -m pip install -r requirements.txt
 
 | 스크립트 | 용도 | 비고 |
 | --- | --- | --- |
-| `scripts/aldrich_mcp.py` | Sigma-Aldrich 제품의 SDS PDF를 언어별로 다운로드 | `curl-cffi` Chrome 모방 세션으로 Akamai 쿠키를 확보한 뒤 PDF를 직접 수집 |
-| `scripts/tci_get.py` | TCI 제품 페이지 HTML 저장 및 SDS 다운로드 | 위와 같은 세션으로 요청하며 JSON 요약을 출력 |
-| `scripts/thermofisher_sds.py` | Thermo Fisher 카테고리/제품 API 크롤링 후 SDS 다운로드 | 공개 JSON API를 그대로 활용 (`requests`) |
+| `scripts/aldrich_mcp.py` | Sigma-Aldrich 제품 SDS PDF를 언어별로 다운로드 | `curl-cffi` Chrome 모방 세션으로 Akamai 쿠키 확보 후 PDF 직접 수집 |
+| `scripts/tci_get.py` | TCI 제품 페이지 HTML 저장·SDS 다운로드 | 동일 세션으로 요청, `--search-term`(물질명·CAS) 지원, JSON 요약 출력 |
+| `scripts/thermofisher_sds.py` | Thermo Fisher 카테고리/제품 API 크롤링·SDS 다운로드 | 공개 JSON API 활용 (`requests`), `--search-term` 제공 |
 
 모든 스크립트는 실행 결과를 JSON 요약으로 출력하여 다운로드 경로와 메타데이터를 한눈에 확인할 수 있습니다.
 
@@ -51,7 +51,7 @@ MCP 클라이언트 설정 예시는 다음과 같습니다.
 
 - `scripts/` : 공급사별 Python 스크립트와 공용 유틸리티
 - `data/` : PDF와 세션 데이터를 기본적으로 저장하는 디렉터리
-- `README_*` : 공급사별 안내 문서(한국어 버전만 유지)
+- `README_*` : 공급사별 안내 문서(한국어 버전)
 - `.playwright-mcp-output/` : MCP 서버 실행 시 생성되는 로그(버전 관리 제외)
 
 ---

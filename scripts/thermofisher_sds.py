@@ -7,7 +7,7 @@ import argparse
 import uuid
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import requests
 
@@ -166,6 +166,24 @@ class ThermoFisherClient:
             if child.get("childCatalogNumber")
             and (child.get("skuStatus") or "").upper() == "RELEASED"
         ]
+
+    def resolve_product_from_search(
+        self,
+        query: str,
+        *,
+        language: str,
+    ) -> Optional[str]:
+        self.ensure_page_loaded(BASE_HOST)
+        referer = f"{BASE_HOST}/"
+        data = self.search_catalog(query, language=language, referer=referer)
+        items: List[Dict[str, object]] = data.get("catalogResultDTOs", [])  # type: ignore[assignment]
+        if not items:
+            return None
+        first = items[0]
+        root = first.get("rootCatalogNumber")
+        if not isinstance(root, str) or not root.strip():
+            return None
+        return f"{BASE_HOST}/apac/product/{root.strip()}"
 
     def fetch_sds_url(
         self,
@@ -414,6 +432,10 @@ def parse_args() -> argparse.Namespace:
         help="Product page URL (can be provided multiple times).",
     )
     target.add_argument(
+        "--search-term",
+        help="Search by material name or CAS number and download SDS for the first product result.",
+    )
+    target.add_argument(
         "--category-url",
         help="Category listing URL on chemicals.thermofisher.kr.",
     )
@@ -468,13 +490,29 @@ def main() -> None:
             )
             product_url = args.category_url
         else:
+            product_urls: List[str] = list(args.product_urls or [])
+            if args.search_term:
+                resolved = client.resolve_product_from_search(
+                    args.search_term,
+                    language=languages[0],
+                )
+                if not resolved:
+                    print(f"No Thermo Fisher product found for search term '{args.search_term}'.")
+                    raise SystemExit(1)
+                print(f"Resolved search term '{args.search_term}' to: {resolved}")
+                if resolved not in product_urls:
+                    product_urls.insert(0, resolved)
+                notes["searchTerm"] = args.search_term
+            if not product_urls:
+                print("Please provide at least one --product-url or a --search-term.")
+                raise SystemExit(1)
             all_records, notes = handle_product_mode(
                 client,
-                product_urls=args.product_urls or [],
+                product_urls=product_urls,
                 languages=languages,
                 output_dir=output_dir,
             )
-            product_url = (args.product_urls or [""])[0]
+            product_url = product_urls[0]
 
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] {exc}")

@@ -26,6 +26,13 @@ Thermo Fisher Chemicals 제품·카테고리 페이지를 순회하면서 공개
     --languages ko \
     --output-dir data/sds_thermofisher
   ```
+- 검색어(물질명 · CAS)로 최상위 제품을 찾아 다운로드:
+  ```bash
+  python scripts/thermofisher_sds.py \
+    --search-term ethanol \
+    --languages ko \
+    --output-dir data/sds_thermofisher
+  ```
 
 ## 주요 옵션
 | 옵션 | 설명 | 기본값 |
@@ -36,6 +43,7 @@ Thermo Fisher Chemicals 제품·카테고리 페이지를 순회하면서 공개
 | `-o`, `--output-dir` | PDF 저장 경로 | `data/sds_thermofisher` |
 | `--page-size` | 카테고리 API 페이지 크기 | `30` |
 | `--max-products` | 카테고리에서 처리할 최대 제품 수 | 제한 없음 |
+| `--search-term` | 검색어(물질명 · CAS)로 최상위 결과 제품을 사용 | 사용 안 함 |
 
 ## 출력 예시
 ```
