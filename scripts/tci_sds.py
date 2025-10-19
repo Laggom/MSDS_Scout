@@ -32,50 +32,141 @@ HTML_ACCEPT = (
 )
 
 
-def create_session() -> requests.Session:
-    session = requests.Session(impersonate="chrome120")
-    session.headers.update(
-        {
-            "User-Agent": USER_AGENT,
-            "Accept": HTML_ACCEPT,
-            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
+class TciClient:
+    """A client for downloading SDSs from TCI."""
+
+    def __init__(self) -> None:
+        self.session = requests.Session(impersonate="chrome120")
+        self.session.headers.update(
+            {
+                "User-Agent": USER_AGENT,
+                "Accept": HTML_ACCEPT,
+                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Connection": "keep-alive",
+                "Pragma": "no-cache",
+                "Cache-Control": "no-cache",
+            }
+        )
+
+    def fetch_product_page(self, url: str) -> str:
+        response = self.session.get(url, timeout=60)
+        response.raise_for_status()
+        return response.text
+
+    def resolve_product_url_from_search(
+        self, term: str, country: str, language: str
+    ) -> Optional[str]:
+        if not term.strip():
+            return None
+
+        search_url = f"https://www.tcichemicals.com/{country}/{language}/search/"
+        params = {"text": term, "sort": "productNameExactMatch"}
+        response = self.session.get(search_url, params=params, timeout=60)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.content, "lxml")
+        product_link = soup.find("a", title=re.compile(term, re.IGNORECASE))
+
+        if not product_link or not product_link.has_attr("href"):
+            return None
+
+        path = product_link["href"]
+        return urljoin("https://www.tcichemicals.com", path)
+
+    def download_sds_documents(
+        self,
+        product_url: str,
+        metadata: SDSMetadata,
+        languages: List[str],
+        output_dir: Path,
+        csrf_token: Optional[str],
+    ) -> List[DownloadRecord]:
+        parsed_url = urlparse(product_url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        endpoint_path = (
+            f"{metadata.context_path.rstrip('/')}/documentSearch/productSDSSearchDoc"
+        )
+        sds_url = urljoin(base_url, endpoint_path)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        available_languages: Dict[str, str] = {
+            code: label for code, label in metadata.languages if code
         }
-    )
-    return session
 
+        records: List[DownloadRecord] = []
+        for requested_lang in languages:
+            lang = requested_lang.strip()
+            if not lang:
+                continue
+            if available_languages and lang not in available_languages:
+                print(
+                    f"- Skipping '{lang}': not listed as an available language on the page."
+                )
+                continue
 
-def fetch_product_page(session: requests.Session, url: str) -> str:
-    response = session.get(url, timeout=60)
-    response.raise_for_status()
-    return response.text
+            data = {
+                "productCode": metadata.product_code.upper(),
+                "langSelector": lang,
+                "selectedCountry": metadata.selected_country,
+            }
+            if csrf_token:
+                data["CSRFToken"] = csrf_token
 
+            try:
+                response = self.session.post(
+                    sds_url,
+                    data=data,
+                    timeout=60,
+                    headers={
+                        "Referer": product_url,
+                        "Origin": base_url,
+                        "Accept": "*/*",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    },
+                )
+            except RequestsError as exc:
+                print(f"- SDS download failed ({lang}): {exc}")
+                continue
 
-def resolve_product_url_from_search(
-    session: requests.Session,
-    *,
-    term: str,
-    country: str,
-    language: str,
-) -> Optional[str]:
-    if not term.strip():
-        return None
+            if response.status_code != 200:
+                print(f"- SDS download failed ({lang}): HTTP {response.status_code}")
+                continue
 
-    search_url = f"https://www.tcichemicals.com/{country}/{language}/search/"
-    params = {"text": term, "sort": "productNameExactMatch"}
-    response = session.get(search_url, params=params, timeout=60)
-    response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            if "pdf" not in content_type.lower() and "octet-stream" not in content_type.lower():
+                response_text = (
+                    response.headers.get("response-text") or response.text[:200]
+                )
+                print(f"- SDS download failed ({lang}): {response_text}")
+                continue
 
-    soup = BeautifulSoup(response.content, "lxml")
-    product_link = soup.find("a", title=re.compile(r"Ethanol", re.IGNORECASE))
+            filename = None
+            disposition = response.headers.get("Content-Disposition", "")
+            if disposition:
+                match = re.search(r'filename[^;=\n]*=((["\']).*?\2|[^;\n]*)', disposition)
+                if match:
+                    filename = match.group(1).strip("\"'")
+            if not filename:
+                filename = f"{metadata.product_code}_{lang}.pdf"
 
-    if not product_link or not product_link.has_attr("href"):
-        return None
+            output_path = output_dir / filename
+            output_path.write_bytes(response.content)
+            print(f"- SDS saved ({lang}): {output_path}")
 
-    path = product_link["href"]
-    return urljoin("https://www.tcichemicals.com", path)
+            records.append(
+                DownloadRecord(
+                    path=output_path,
+                    languages=normalize_languages([lang]),
+                    source_url=sds_url,
+                    metadata={
+                        "productCode": metadata.product_code,
+                        "country": metadata.selected_country,
+                    },
+                )
+            )
+
+        return records
 
 
 @dataclass
@@ -151,94 +242,6 @@ def parse_sds_metadata(html: str) -> Optional[SDSMetadata]:
     )
 
 
-def download_sds_documents(
-    session: requests.Session,
-    product_url: str,
-    metadata: SDSMetadata,
-    languages: List[str],
-    output_dir: Path,
-    csrf_token: Optional[str],
-) -> List[DownloadRecord]:
-    parsed_url = urlparse(product_url)
-    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-    endpoint_path = f"{metadata.context_path.rstrip('/')}/documentSearch/productSDSSearchDoc"
-    sds_url = urljoin(base_url, endpoint_path)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    available_languages: Dict[str, str] = {code: label for code, label in metadata.languages if code}
-
-    records: List[DownloadRecord] = []
-    for requested_lang in languages:
-        lang = requested_lang.strip()
-        if not lang:
-            continue
-        if available_languages and lang not in available_languages:
-            print(f"- Skipping '{lang}': not listed as an available language on the page.")
-            continue
-
-        data = {
-            "productCode": metadata.product_code.upper(),
-            "langSelector": lang,
-            "selectedCountry": metadata.selected_country,
-        }
-        if csrf_token:
-            data["CSRFToken"] = csrf_token
-
-        try:
-            response = session.post(
-                sds_url,
-                data=data,
-                timeout=60,
-                headers={
-                    "Referer": product_url,
-                    "Origin": base_url,
-                    "Accept": "*/*",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                },
-            )
-        except RequestsError as exc:
-            print(f"- SDS download failed ({lang}): {exc}")
-            continue
-
-        if response.status_code != 200:
-            print(f"- SDS download failed ({lang}): HTTP {response.status_code}")
-            continue
-
-        content_type = response.headers.get("Content-Type", "")
-        if "pdf" not in content_type.lower() and "octet-stream" not in content_type.lower():
-            response_text = response.headers.get("response-text") or response.text[:200]
-            print(f"- SDS download failed ({lang}): {response_text}")
-            continue
-
-        filename = None
-        disposition = response.headers.get("Content-Disposition", "")
-        if disposition:
-            match = re.search(r'filename[^;=\n]*=((["\']).*?\2|[^;\n]*)', disposition)
-            if match:
-                filename = match.group(1).strip("\"'")
-        if not filename:
-            filename = f"{metadata.product_code}_{lang}.pdf"
-
-        output_path = output_dir / filename
-        output_path.write_bytes(response.content)
-        print(f"- SDS saved ({lang}): {output_path}")
-
-        records.append(
-            DownloadRecord(
-                path=output_path,
-                languages=normalize_languages([lang]),
-                source_url=sds_url,
-                metadata={
-                    "productCode": metadata.product_code,
-                    "country": metadata.selected_country,
-                },
-            )
-        )
-
-    return records
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -278,19 +281,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--search-term",
-        help="Lookup the product by material name or CAS number and use the top result."
+        help="Lookup the product by material name or CAS number and use the top result.",
     )
     args = parser.parse_args()
 
     product_url = args.product_url
-    session = create_session()
+    client = TciClient()
     if args.search_term:
         parsed = urlparse(product_url)
         segments = [segment for segment in parsed.path.split("/") if segment]
         country = segments[0] if len(segments) >= 1 else "KR"
         language = segments[1] if len(segments) >= 2 else "ko"
-        resolved = resolve_product_url_from_search(
-            session,
+        resolved = client.resolve_product_url_from_search(
             term=args.search_term,
             country=country,
             language=language,
@@ -302,7 +304,7 @@ def main() -> None:
         product_url = resolved
 
     try:
-        html = fetch_product_page(session, product_url)
+        html = client.fetch_product_page(product_url)
     except RequestsError as exc:
         print(f"Failed to fetch product page: {exc}")
         raise SystemExit(1) from exc
@@ -312,7 +314,11 @@ def main() -> None:
     print(f"HTML saved ({len(html)} bytes): {html_output_path}")
 
     metadata = parse_sds_metadata(html)
-    product_code = metadata.product_code if metadata else urlparse(product_url).path.rstrip("/").split("/")[-1]
+    product_code = (
+        metadata.product_code
+        if metadata
+        else urlparse(product_url).path.rstrip("/").split("/")[-1]
+    )
 
     records: List[DownloadRecord] = []
     if args.download_sds:
@@ -330,8 +336,7 @@ def main() -> None:
                 print("No languages requested; skipping SDS download.")
             else:
                 sds_output_dir = (REPO_ROOT / args.sds_output_dir).resolve()
-                records = download_sds_documents(
-                    session,
+                records = client.download_sds_documents(
                     product_url,
                     metadata,
                     requested_languages,
