@@ -14,19 +14,19 @@ python -m pip install -r requirements.txt
 ```
 
 ## 스크립트 개요
-- 경로: `scripts/tci_get.py`
+- 경로: `scripts/tci_sds.py`
 - 기능: 제품 페이지 HTML을 저장하고, 필요한 경우 언어별 SDS PDF를 직접 다운로드합니다.
 
 ## 사용 방법
 - HTML만 저장:
   ```bash
-  python scripts/tci_get.py \
+  python scripts/tci_sds.py \
     --product-url https://www.tcichemicals.com/KR/ko/p/L0483 \
     --html-output tci_product.html
   ```
 - SDS까지 함께 다운로드:
   ```bash
-  python scripts/tci_get.py \
+  python scripts/tci_sds.py \
     --product-url https://www.tcichemicals.com/KR/ko/p/L0483 \
     --download-sds \
     --languages ko en \
@@ -34,7 +34,7 @@ python -m pip install -r requirements.txt
   ```
 - 검색어(물질명 또는 CAS)로 제품을 찾아 다운로드:
   ```bash
-  python scripts/tci_get.py \
+  python scripts/tci_sds.py \
     --search-term ethanol \
     --download-sds \
     --languages ko \
@@ -48,7 +48,7 @@ python -m pip install -r requirements.txt
 | `--html-output`, `--output` | 저장할 HTML 파일 경로 | `tci_product.html` |
 | `--download-sds` | SDS PDF까지 다운로드 | 사용 안 함 |
 | `--languages` | 다운로드할 언어 코드 (`ko`, `en` 등). 생략 시 페이지에 노출된 언어 전체를 사용 | 페이지 언어 목록 |
-| `--output-dir` | SDS PDF 저장 폴더 | `data/sds` |
+| `--output-dir` | SDS PDF 저장 폴더 | `data/sds_tci` |
 | `--use-existing-session` | 하위 호환용 플래그. 현재 동작에는 영향 없음 | 사용 안 함 |
 | `--search-term` | 검색어(물질명 또는 CAS)로 제품을 찾은 뒤 최상위 결과를 사용 | 사용 안 함 |
 

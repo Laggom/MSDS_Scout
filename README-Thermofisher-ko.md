@@ -55,7 +55,7 @@ Thermo Fisher Chemicals 제품·카테고리 페이지를 순회하면서 공개
     {
       "path": "C:\\...\\B21525_KO.pdf",
       "languages": ["ko"],
-      "sourceUrl": "https://assets.thermofisher.com/directwebviewer/private/results.aspx?page=NewSearch&LANGUAGE=d__KO&SUBFORMAT=d__KOSD&SKU=ALFAAB21525&PLANT=d__ALF",
+      "sourceUrl": "https://assets.thermofisher.com/directwebviewer/private/results.aspx?page=NewSearch&LANGUAGE=d__KO&SUBFORMAT=d__KOSD&SKU=d__ALFAAB21525&PLANT=d__ALF",
       "metadata": {
         "rootSku": "B21525"
       }

@@ -14,12 +14,12 @@ python -m pip install -r requirements.txt
 ```
 
 ## 스크립트 개요
-- 경로: `scripts/aldrich_mcp.py`
+- 경로: `scripts/aldrich_sds.py`
 - 용도: 지정한 언어의 SDS PDF를 직접 HTTPS 요청으로 다운로드합니다. (Playwright MCP, Node 헬퍼 사용 안 함)
 
 ## 사용 예시
 ```bash
-python scripts/aldrich_mcp.py \
+python scripts/aldrich_sds.py \
   --product-url https://www.sigmaaldrich.com/KR/ko/product/sigald/34873 \
   --languages ko en \
   --output-dir data/sds_aldrich
