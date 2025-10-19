@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
-"""Sigma-Aldrich SDS downloader using Playwright MCP helpers."""
+"""Sigma-Aldrich SDS downloader using direct HTTP requests."""
+
+from __future__ import annotations
 
 import argparse
-import json
 import re
-import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
+
+from curl_cffi import requests
+from curl_cffi.requests import RequestsError
 
 from sds_common import DownloadRecord, build_summary, normalize_languages, print_summary
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DOWNLOAD_HELPER = REPO_ROOT / "scripts" / "download_sds_with_playwright.js"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Safari/537.36"
+)
+
+HTML_ACCEPT = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+)
+
+PDF_ACCEPT = "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8"
 
 
 def parse_product_url(product_url: str) -> Optional[Tuple[str, str, str, str]]:
@@ -25,78 +39,86 @@ def parse_product_url(product_url: str) -> Optional[Tuple[str, str, str, str]]:
     return match.group(1), match.group(2), match.group(3), match.group(4)
 
 
-def ensure_helper_exists() -> None:
-    if not DOWNLOAD_HELPER.exists():
-        raise FileNotFoundError(
-            f"Required helper script is missing: {DOWNLOAD_HELPER.relative_to(REPO_ROOT)}"
-        )
+def compose_accept_language(country: str, language: str) -> str:
+    primary = f"{language}-{country}"
+    return f"{primary},{language};q=0.9,en-US;q=0.8,en;q=0.7"
 
 
-def download_with_playwright(
+def create_session() -> requests.Session:
+    session = requests.Session(impersonate="chrome120")
+    session.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Accept": HTML_ACCEPT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive",
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
+        }
+    )
+    return session
+
+
+def prime_session(session: requests.Session, product_url: str, accept_language: str) -> None:
+    """Fetch the product page once to obtain cookies and verify access."""
+    response = session.get(
+        product_url,
+        timeout=60,
+        headers={"Accept-Language": accept_language},
+    )
+    response.raise_for_status()
+
+
+def download_sds(
+    session: requests.Session,
+    *,
     sds_url: str,
     output_path: Path,
-    referer: str,
-    accept_language: str,
+    product_url: str,
+    country: str,
+    language: str,
 ) -> Optional[DownloadRecord]:
-    """Invoke the Node.js helper that uses Playwright request API."""
-    command = [
-        "node",
-        str(DOWNLOAD_HELPER.relative_to(REPO_ROOT)),
-        sds_url,
-        str(output_path),
-        referer,
-        accept_language,
-    ]
-
-    result = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        timeout=180,
-    )
-
-    if result.returncode != 0:
-        print(f"  Helper failed with exit code {result.returncode}")
-        if result.stdout:
-            print(result.stdout.strip())
-        if result.stderr:
-            print(result.stderr.strip())
-        return None
-
+    accept_language = compose_accept_language(country, language)
     try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("  Unable to decode helper response:")
-        print(result.stdout.strip())
+        response = session.get(
+            sds_url,
+            timeout=90,
+            headers={
+                "Accept": PDF_ACCEPT,
+                "Accept-Language": accept_language,
+                "Referer": product_url,
+            },
+        )
+    except RequestsError as exc:
+        print(f"  Failed ({language}): {exc}")
         return None
 
-    status = payload.get("status")
-    headers = payload.get("headers", {})
-    content_type = headers.get("content-type", "")
-
-    if status != 200:
-        print(f"  Failed: HTTP {status}")
+    if response.status_code != 200:
+        print(f"  Failed ({language}): HTTP {response.status_code}")
         return None
 
+    content_type = response.headers.get("Content-Type", "")
     if "pdf" not in content_type.lower():
-        print(f"  Failed: Content-Type '{content_type}' is not PDF")
+        preview = response.text[:200] if response.text else ""
+        print(f"  Failed ({language}): unexpected content-type '{content_type}' ({preview})")
         return None
 
+    output_path.write_bytes(response.content)
     print(f"  Saved {output_path}")
+
     return DownloadRecord(
         path=output_path,
-        languages=[accept_language.split(",")[0].split("-")[1].lower()],
+        languages=[language.lower()],
         source_url=sds_url,
-        metadata={"referer": referer},
+        metadata={
+            "referer": product_url,
+        },
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download Sigma-Aldrich SDS PDFs using Playwright MCP.",
+        description="Download Sigma-Aldrich SDS PDFs without Playwright MCP.",
     )
     parser.add_argument(
         "--product-url",
@@ -124,19 +146,24 @@ def main() -> None:
     args = parser.parse_args()
     product_url = args.product_url or args.legacy_product_url
     if not product_url:
-        parser.error("제품 페이지 URL을 --product-url 옵션으로 지정해주세요.")
-
-    ensure_helper_exists()
+        parser.error("Please provide a product page URL with --product-url.")
 
     parsed = parse_product_url(product_url)
     if not parsed:
         print(f"Invalid product URL format: {product_url}")
         print("Example: https://www.sigmaaldrich.com/KR/ko/product/sigald/34873")
-        return
+        sys.exit(1)
 
     country, default_language, brand, product_number = parsed
     languages = normalize_languages(args.languages) or [default_language]
-    accept_language = f"{default_language}-{country},{default_language};q=0.9,en-US;q=0.8,en;q=0.7"
+
+    session = create_session()
+    accept_language = compose_accept_language(country, default_language)
+    try:
+        prime_session(session, product_url, accept_language)
+    except RequestsError as exc:
+        print(f"Failed to fetch product page: {exc}")
+        sys.exit(1)
 
     output_root = (REPO_ROOT / args.output_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -153,14 +180,15 @@ def main() -> None:
         output_path = output_root / filename
 
         print(f"\nAttempting SDS download ({language}): {sds_url}")
-        record = download_with_playwright(
-            sds_url,
-            output_path,
-            product_url,
-            accept_language,
+        record = download_sds(
+            session,
+            sds_url=sds_url,
+            output_path=output_path,
+            product_url=product_url,
+            country=country,
+            language=language,
         )
         if record:
-            record.languages = [language.lower()]
             records.append(record)
 
     summary = build_summary(

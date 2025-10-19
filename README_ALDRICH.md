@@ -1,27 +1,35 @@
-﻿# Sigma-Aldrich SDS Downloader
+# Sigma-Aldrich SDS Downloader
 
-This repository bundles a Playwright MCP-based helper for collecting Sigma-Aldrich Safety Data Sheets (SDS). Once Playwright MCP is installed (`npm install`, `npm run playwright:install`), the Python script can reuse the same configuration used for the TCI workflow.
+Helper script for collecting Sigma-Aldrich Safety Data Sheets (SDS) without Playwright. The downloader now relies on [`curl-cffi`](https://github.com/yifeikong/curl_cffi) to impersonate a recent Chrome TLS fingerprint so that the public SDS endpoints accept the requests.
 
 ## Requirements
 - Python 3.11+
-- Node.js 18+
-- Playwright MCP dependencies (`npm install` in the repo root)
-- Playwright browser binaries (`npm run playwright:install`)
+- `requests`
+- `curl-cffi` (provides the browser-style HTTP client)
+
+Install the dependencies with:
+
+```bash
+python -m pip install -r requirements.txt
+```
 
 ## Script
 - Path: `scripts/aldrich_mcp.py`
-- Purpose: Uses the Node helper `scripts/download_sds_with_playwright.js` to fetch SDS PDFs for the requested languages.
+- Purpose: Fetch SDS PDFs for the requested languages using direct HTTPS calls (no Playwright MCP, no Node helper).
 
 ### Usage
 ```bash
-python scripts/aldrich_mcp.py --product-url https://www.sigmaaldrich.com/KR/ko/product/sigald/34873 --languages ko en --output-dir data/sds_aldrich
+python scripts/aldrich_mcp.py \
+  --product-url https://www.sigmaaldrich.com/KR/ko/product/sigald/34873 \
+  --languages ko en \
+  --output-dir data/sds_aldrich
 ```
 
 ### Options
 | Option | Description | Default |
 | --- | --- | --- |
 | `--product-url` | Product detail URL (e.g. `https://www.sigmaaldrich.com/KR/ko/product/sigald/34873`) | required |
-| `-l`, `--languages` | Language codes to download (e.g. `ko en`). If omitted, the language encoded in the product URL is used. | URL language |
+| `-l`, `--languages` | Language codes to download (e.g. `ko en`). If omitted, the language encoded in the URL is used. | URL language |
 | `-o`, `--output-dir` | Directory for downloaded PDFs | `data/sds_aldrich` |
 
 ### Example output
@@ -46,23 +54,23 @@ python scripts/aldrich_mcp.py --product-url https://www.sigmaaldrich.com/KR/ko/p
 }
 ```
 
-> If the requested language does not exist, the helper prints the HTTP status and skips the file. The script exits with status code `1` when no SDS files are downloaded.
+When a language is unavailable the script reports the HTTP status and skips the file. It exits with status code `1` if no SDS files are downloaded.
 
 ## Batch test helper
-`scripts/test_aldrich_multiple.py` iterates over a preset list of product URLs and reuses `aldrich_mcp.py` to verify availability after updates.
+`scripts/test_aldrich_multiple.py` still iterates over a preset list of product URLs and reuses `aldrich_mcp.py` to verify availability after updates.
 
 ## How it works
 1. Parse the product URL (country/language/brand/product number).
-2. Refresh cookies and headers through Playwright MCP (`scripts/fetchHeaders.js`).
-3. Use the Node helper to download each SDS PDF via Playwright''s `APIRequestContext`.
-4. Save PDFs as `{product}_{country}_{language}.pdf` in the configured output directory.
+2. Issue a priming request with `curl-cffi` (Chrome 120 impersonation) to obtain the necessary Akamai cookies.
+3. Request each SDS PDF directly over HTTPS with the prepared session.
+4. Save PDFs as `{product}_{country}_{language}.pdf` in the configured output directory and emit a JSON summary.
 
 ## Troubleshooting
 | Symptom | Cause | Resolution |
 | --- | --- | --- |
 | HTTP 404 | SDS not offered for the language/product | Confirm in the browser or try a different language |
-| Timeout | Upstream site is slow | Retry later or inspect network connectivity |
-| `Helper failed` | Node helper exited abnormally | Inspect the printed stdout/stderr for details |
+| Timeout | Upstream site is slow or blocking traffic | Retry later; ensure outbound HTTPS is allowed |
+| `RequestsError` | Akamai rejected the TLS/client fingerprint | Upgrade `curl-cffi` and rerun; try a different impersonation profile |
 
 ---
-Last updated: 2025-10-18
+Last updated: 2025-10-19

@@ -1,68 +1,52 @@
 #!/usr/bin/env python3
-"""TCI 제품 페이지 HTML과 SDS를 Playwright MCP를 통해 수집합니다."""
+"""TCI product HTML and SDS downloader using plain HTTP requests."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import subprocess
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
-import requests
+from curl_cffi import requests
+from curl_cffi.requests import RequestsError
 
 from sds_common import DownloadRecord, build_summary, normalize_languages, print_summary
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SESSION_JSON = REPO_ROOT / "data" / "tci_session.json"
 URL_DEFAULT = "https://www.tcichemicals.com/KR/ko/p/L0483"
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Safari/537.36"
+)
 
-def refresh_session(url: str) -> Dict:
-    """Playwright MCP로 헤더와 쿠키를 갱신합니다."""
-    result = subprocess.run(
-        ["node", "scripts/fetchHeaders.js", url],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-        timeout=120,
+HTML_ACCEPT = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+)
+
+
+def create_session() -> requests.Session:
+    session = requests.Session(impersonate="chrome120")
+    session.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Accept": HTML_ACCEPT,
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "keep-alive",
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
+        }
     )
-    session = json.loads(result.stdout)
-    SESSION_JSON.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_JSON.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
     return session
 
 
-def load_cookies(session: Dict) -> Dict[str, str]:
-    """Playwright storageState 형식을 requests 쿠키로 변환합니다."""
-    return {cookie["name"]: cookie["value"] for cookie in session.get("cookies", {}).get("cookies", [])}
-
-
-def build_headers() -> Dict[str, str]:
-    return {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "User-Agent": "Playwright/1.57.0-alpha",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Connection": "keep-alive",
-    }
-
-
-def create_requests_session(headers: Dict[str, str], cookies: Dict[str, str]) -> requests.Session:
-    session = requests.Session()
-    session.headers.update(headers)
-    session.cookies.update(cookies)
-    return session
-
-
-def fetch_html(session: requests.Session, url: str) -> str:
-    response = session.get(url, timeout=30)
+def fetch_product_page(session: requests.Session, url: str) -> str:
+    response = session.get(url, timeout=60)
     response.raise_for_status()
     return response.text
 
@@ -162,7 +146,7 @@ def download_sds_documents(
         if not lang:
             continue
         if available_languages and lang not in available_languages:
-            print(f"경고: 페이지에서 제공하지 않는 언어 코드 '{lang}'는 건너뜁니다.")
+            print(f"- Skipping '{lang}': not listed as an available language on the page.")
             continue
 
         data = {
@@ -186,18 +170,18 @@ def download_sds_documents(
                     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 },
             )
-        except requests.RequestException as exc:
-            print(f"- SDS 다운로드 실패({lang}): {exc}")
+        except RequestsError as exc:
+            print(f"- SDS download failed ({lang}): {exc}")
             continue
 
         if response.status_code != 200:
-            print(f"- SDS 다운로드 실패({lang}): HTTP {response.status_code}")
+            print(f"- SDS download failed ({lang}): HTTP {response.status_code}")
             continue
 
         content_type = response.headers.get("Content-Type", "")
         if "pdf" not in content_type.lower() and "octet-stream" not in content_type.lower():
             response_text = response.headers.get("response-text") or response.text[:200]
-            print(f"- SDS 다운로드 실패({lang}): {response_text}")
+            print(f"- SDS download failed ({lang}): {response_text}")
             continue
 
         filename = None
@@ -211,7 +195,7 @@ def download_sds_documents(
 
         output_path = output_dir / filename
         output_path.write_bytes(response.content)
-        print(f"- SDS 저장 완료({lang}): {output_path}")
+        print(f"- SDS saved ({lang}): {output_path}")
 
         records.append(
             DownloadRecord(
@@ -235,51 +219,49 @@ def main() -> None:
         "--url",
         dest="product_url",
         default=URL_DEFAULT,
-        help="TCI 제품 페이지 URL",
+        help="TCI product page URL",
     )
     parser.add_argument(
         "--html-output",
         "--output",
         dest="html_output",
         default="tci_product.html",
-        help="HTML을 저장할 파일 경로(저장소 기준)",
-    )
-    parser.add_argument(
-        "--use-existing-session",
-        action="store_true",
-        help="저장된 세션(JSON)을 재사용합니다.",
+        help="Path for saving the fetched HTML (optional).",
     )
     parser.add_argument(
         "--download-sds",
         action="store_true",
-        help="SDS PDF까지 함께 다운로드합니다.",
+        help="Download SDS PDFs in addition to saving the HTML.",
     )
     parser.add_argument(
         "--languages",
         nargs="+",
-        help="SDS 다운로드 언어 코드 목록 (예: ko en). 비우면 페이지에서 제공하는 모든 언어를 사용합니다.",
+        help="Language codes to download (e.g. ko en). Defaults to the languages listed on the page.",
     )
     parser.add_argument(
         "--output-dir",
         dest="sds_output_dir",
         default="data/sds",
-        help="SDS PDF를 저장할 디렉터리",
+        help="Directory for downloaded SDS PDFs.",
+    )
+    parser.add_argument(
+        "--use-existing-session",
+        action="store_true",
+        help="Deprecated flag kept for compatibility; sessions are handled automatically.",
     )
     args = parser.parse_args()
 
     product_url = args.product_url
-
-    if args.use_existing_session and SESSION_JSON.exists():
-        session_state = json.loads(SESSION_JSON.read_text(encoding="utf-8"))
-    else:
-        session_state = refresh_session(product_url)
-
-    requests_session = create_requests_session(build_headers(), load_cookies(session_state))
-    html = fetch_html(requests_session, product_url)
+    session = create_session()
+    try:
+        html = fetch_product_page(session, product_url)
+    except RequestsError as exc:
+        print(f"Failed to fetch product page: {exc}")
+        raise SystemExit(1) from exc
 
     html_output_path = (REPO_ROOT / args.html_output).resolve()
     html_output_path.write_text(html, encoding="utf-8")
-    print(f"HTML 저장 완료 ({len(html)} bytes): {html_output_path}")
+    print(f"HTML saved ({len(html)} bytes): {html_output_path}")
 
     metadata = parse_sds_metadata(html)
     product_code = metadata.product_code if metadata else urlparse(product_url).path.rstrip("/").split("/")[-1]
@@ -287,21 +269,21 @@ def main() -> None:
     records: List[DownloadRecord] = []
     if args.download_sds:
         if not metadata:
-            print("SDS 메타데이터를 페이지에서 찾지 못했습니다.")
+            print("SDS metadata not found in the HTML; cannot download SDS.")
         else:
             csrf_token = extract_csrf_token(html)
             if not csrf_token:
-                print("경고: CSRF 토큰을 찾지 못했습니다. SDS 다운로드가 실패할 수 있습니다.")
+                print("Warning: CSRF token not found; SDS download may fail.")
 
             requested_languages = normalize_languages(args.languages) or [
                 code for code, _ in metadata.languages if code
             ]
             if not requested_languages:
-                print("다운로드할 언어가 없어 SDS를 건너뜁니다.")
+                print("No languages requested; skipping SDS download.")
             else:
                 sds_output_dir = (REPO_ROOT / args.sds_output_dir).resolve()
                 records = download_sds_documents(
-                    requests_session,
+                    session,
                     product_url,
                     metadata,
                     requested_languages,
@@ -309,7 +291,7 @@ def main() -> None:
                     csrf_token,
                 )
                 if not records:
-                    print("SDS 파일을 다운로드하지 못했습니다.")
+                    print("No SDS files were downloaded.")
 
     summary = build_summary(
         provider="tci",
@@ -317,7 +299,7 @@ def main() -> None:
         product_url=product_url,
         html_path=html_output_path,
         downloads=records,
-        notes={"sessionPath": str(SESSION_JSON)},
+        notes={"userAgent": USER_AGENT},
     )
     print_summary(summary)
 
